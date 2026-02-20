@@ -1,0 +1,62 @@
+# Node modules
+node_modules
+npm-debug.log
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json.lock
+
+# Logs
+logs
+*.log
+*.log.*
+
+# Environment files
+.env
+.env.* 
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build output
+dist
+build
+coverage
+.tmp
+.temp
+
+# Docker-specific
+Dockerfile*
+.dockerignore
+
+# IDE / Editor files
+.vscode
+.idea
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+.gitlab
+.gitattributes
+
+# Cache
+.cache
+.nyc_output
+.eslintcache
+
+# Test
+__tests__
+__mocks__
+
+# Misc
+*.pid
+*.seed
+*.pid.lock
+
+# Local development scripts/files
+scripts/local/*
+

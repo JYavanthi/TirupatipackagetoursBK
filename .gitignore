@@ -1,0 +1,9 @@
+.env
+਍‣汅獡楴⁣敂湡瑳污⁫楆敬൳⸊汥獡楴扣慥獮慴歬⨯਍⸡汥獡楴扣慥獮慴歬⨯挮杦礮汭਍⸡汥獡楴扣慥獮慴歬⨯朮潬慢⹬浹൬
+# Elastic Beanstalk Files
+.elasticbeanstalk/*
+!.elasticbeanstalk/*.cfg.yml
+!.elasticbeanstalk/*.global.yml
+
+node_modules
+node_modules/*
