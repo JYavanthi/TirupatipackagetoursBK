@@ -772,7 +772,7 @@ const transporter = nodemailer.createTransport({
   secure: true, // SSL
   auth: {
     user: "enquiry@tirupatipackagetours.com", // your domain email
-    pass: "Nagesh1987@",                     // actual email password
+    pass: "Nagesh@1987",                     // actual email password
   },
 });
 
