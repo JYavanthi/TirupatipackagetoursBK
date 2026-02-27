@@ -768,12 +768,16 @@ app.get("/api/package-list", (req, res) => {
 // Hard-coded transporter for tirupatipackagetours.com email
 const transporter = nodemailer.createTransport({
   host: "smtpout.secureserver.net", // GoDaddy SMTP
-  port: 465,
-  secure: true, // SSL
+  port: 587,
+  secure: false, // SSL
+  requireTLS: true,
   auth: {
     user: "enquiry@tirupatipackagetours.com", // your domain email
     pass: "Nagesh@1987",                     // actual email password
   },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
 });
 
 // Optional: Verify SMTP connection on startup
