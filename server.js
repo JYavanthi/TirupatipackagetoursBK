@@ -1284,7 +1284,7 @@ app.get("/payment/redirect", async (req, res) => {
 
     if (state === "COMPLETED") {
       await pool.request().query(`
-        UPDATE BusBookingDetails
+        UPDATE BusBookingSeat
         SET PaymentStatus = 'Success', Status = 'Booked'
         WHERE BusBookingSeatID IN (${seatIdsStr})
       `);
@@ -1292,7 +1292,7 @@ app.get("/payment/redirect", async (req, res) => {
       return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=success&orderId=${orderId}`);
     } else if (state === "FAILED") {
       await pool.request().query(`
-        UPDATE BusBookingDetails
+        UPDATE BusBookingSeat
         SET PaymentStatus = 'Failed', Status = 'Cancelled'
         WHERE BusBookingSeatID IN (${seatIdsStr})
       `);
@@ -1305,7 +1305,7 @@ app.get("/payment/redirect", async (req, res) => {
   }
 
   await pool.request().query(`
-    UPDATE BusBookingDetails
+    UPDATE BusBookingSeat
     SET PaymentStatus = 'Failed', Status = 'Cancelled'
     WHERE BusBookingSeatID IN (${seatIdsStr})
   `);
