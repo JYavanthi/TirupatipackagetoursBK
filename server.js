@@ -1175,10 +1175,16 @@ const client = StandardCheckoutClient.getInstance(
 
 app.post("/api/payment/create-order", async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { amount, busBookingSeatIds, merchantOrderId } = req.body;
 
-    const merchantOrderId = randomUUID();
     console.log("Merchant Order ID:", merchantOrderId);
+
+    const seatIdsParam = Array.isArray(busBookingSeatIds)
+      ? busBookingSeatIds.join(",")
+      : busBookingSeatIds ?? "";
+
+    const redirectUrl = `https://api.tirupatipackagetours.com/payment/redirect?orderId=${merchantOrderId}&seatIds=${seatIdsParam}`;
+
 
     const metaInfo = MetaInfo.builder()
       .udf1("custom-data")
@@ -1187,18 +1193,11 @@ app.post("/api/payment/create-order", async (req, res) => {
     const paymentRequest = StandardCheckoutPayRequest.builder()
       .merchantOrderId(merchantOrderId)
       .amount(Number(amount))     // amount in paise
-      // .redirectUrl(redirectUrl)
-      .redirectUrl("https://api.tirupatipackagetours.com/payment/redirect?orderId=" + merchantOrderId)
+      .redirectUrl(redirectUrl)
       .metaInfo(metaInfo)
       .build();
 
     const response = await client.pay(paymentRequest);
-
-    // return res.json({
-    //   success: true,
-    //   checkoutUrl: response.redirectUrl,
-    //   merchantOrderId
-    // });
 
     return res.json({
       success: true,
@@ -1254,10 +1253,16 @@ app.post("/api/payment/create-order", async (req, res) => {
 // });
 //
 app.get("/payment/redirect", async (req, res) => {
-  const { orderId } = req.query;
+  const { orderId, seatIds } = req.query;
 
-  if (!orderId) return res.redirect("https://www.tirupatipackagetours.com/payment-result?status=failed");
+  const busBookingSeatIds = seatIds
+    ? seatIds.split(",").map(Number)
+    : [];
 
+
+  if (!orderId || !busBookingSeatIds) return res.redirect("https://www.tirupatipackagetours.com/payment-result?status=failed");
+
+  const pool = await sql.connect(dbConfig);
   // Polling function
   const checkPayment = async () => {
     try {
@@ -1271,14 +1276,26 @@ app.get("/payment/redirect", async (req, res) => {
   let attempts = 0;
   const maxAttempts = 10; // adjust according to your patience window
   const interval = 3000; // 3 seconds
+  const seatIdsStr = busBookingSeatIds.join(",");
 
   while (attempts < maxAttempts) {
     const state = await checkPayment();
     console.log("State:", state);
 
     if (state === "COMPLETED") {
+      await pool.request().query(`
+        UPDATE BusBookingDetails
+        SET PaymentStatus = 'Success', Status = 'Booked'
+        WHERE BusBookingSeatID IN (${seatIdsStr})
+      `);
+
       return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=success&orderId=${orderId}`);
     } else if (state === "FAILED") {
+      await pool.request().query(`
+        UPDATE BusBookingDetails
+        SET PaymentStatus = 'Failed', Status = 'Cancelled'
+        WHERE BusBookingSeatID IN (${seatIdsStr})
+      `);
       return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=failed&orderId=${orderId}`);
     }
 
@@ -1287,6 +1304,11 @@ app.get("/payment/redirect", async (req, res) => {
     attempts++;
   }
 
+  await pool.request().query(`
+    UPDATE BusBookingDetails
+    SET PaymentStatus = 'Failed', Status = 'Cancelled'
+    WHERE BusBookingSeatID IN (${seatIdsStr})
+  `);
   // If still pending after max attempts, consider it failed or show pending page
   return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=loading&orderId=${orderId}`);
 });
