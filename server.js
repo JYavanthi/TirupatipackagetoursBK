@@ -227,6 +227,21 @@ app.post("/api/bus-booking-details", async (req, res) => {
   }
 });
 
+///////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 app.get("/api/bus-details", async (req, res) => {
   try {
     const { packageId, journeyDate } = req.query;
@@ -825,6 +840,59 @@ app.post("/api/submit-feedback", async (req, res) => {
   }
 });
 
+app.post("/api/send-ticket", async (req, res) => {
+  try {
+    const { travellerData, contactData, gstData, totalPrice, tripData } = req.body;
+
+    const passenger = travellerData?.[0] || {};
+
+    const mailOptions = {
+      from: `"Tirupati Package Tours" <enquiry@tirupatipackagetours.com>`,
+      to: contactData?.email || "enquiry@tirupatipackagetours.com",
+      subject: "Your Tirupati Package Booking Ticket",
+      html: `
+        <h2>Booking Confirmation</h2>
+
+        <h3>Passenger Details</h3>
+        <p><strong>Name:</strong> ${passenger.name || ""}</p>
+        <p><strong>Age:</strong> ${passenger.age || ""}</p>
+        <p><strong>Gender:</strong> ${passenger.gender || ""}</p>
+
+        <h3>Contact Details</h3>
+        <p><strong>Name:</strong> ${contactData?.name || ""}</p>
+        <p><strong>Email:</strong> ${contactData?.email || ""}</p>
+        <p><strong>Phone:</strong> ${contactData?.phone || ""}</p>
+
+        <h3>Trip Details</h3>
+        <p><strong>Package:</strong> ${tripData?.packageName || ""}</p>
+        <p><strong>Journey Date:</strong> ${tripData?.date || ""}</p>
+
+        <h3>Payment</h3>
+        <p><strong>Total Amount:</strong> ₹${totalPrice}</p>
+
+        <br/>
+        <p>Thank you for booking with <b>Tirupati Package Tours</b>.</p>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.json({
+      success: true,
+      message: "Ticket email sent successfully",
+    });
+
+  } catch (error) {
+    console.error("Ticket email error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to send ticket email",
+      error: error.toString(),
+    });
+  }
+});
+
 app.get("/api/busBoardingCounts", async (req, res) => {
   try {
     const pool = await sql.connect(dbConfig);
@@ -1094,6 +1162,19 @@ const client = StandardCheckoutClient.getInstance(
   Env.PRODUCTION
   //Env.SANDBOX
 );
+
+// const clientId = "TEST-M222NJL8ZHVEM_25041";
+// const clientSecret = "NjIxZTdiZGYtMzlkOS00ZTkyLWFhNjItZTZhNTBjNTgyM2I0";
+// const clientVersion = 1;
+
+// const client = StandardCheckoutClient.getInstance(
+//   clientId,
+//   clientSecret,
+//   clientVersion,
+//   Env.SANDBOX
+// );
+
+
 
 
 
