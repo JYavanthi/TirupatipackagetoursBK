@@ -27,6 +27,7 @@ app.use(
     origin: [
       "https://www.tirupatipackagetours.com",
       "https://tirupatipackagetours.com",
+      "https://dev.tirupatipackagetours.com",
       "http://localhost:8080"
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -46,8 +47,8 @@ const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   server: process.env.DB_SERVER,
-  port: 1433,
-  database: "Sanchar6T_Dev",
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
   options: {
     encrypt: true,
     trustServerCertificate: true,
@@ -1196,16 +1197,20 @@ app.post("/api/success", async (req, res) => {
 // const CLIENT_VERSION = "1";
 // const SANDBOX_BASE_URL = "https://api-preprod.phonepe.com/apis/pg-sandbox";
 
-const clientId = "SU2512041519267109485044";
-const clientSecret = "e1babbea-ec50-4ac6-9b46-9a2ce64a5e04";
+// const clientId = "SU2512041519267109485044";
+// const clientSecret = "e1babbea-ec50-4ac6-9b46-9a2ce64a5e04";
+// const clientVersion = 1;
+//
+const clientId = process.env.PHONEPE_CLIENT_ID;
+const clientSecret = process.env.PHONEPE_CLIENT_SECRET;
 const clientVersion = 1;
+const enviroment = process.env.ENVIRONMENT == dev ? Env.SANDBOX : Env.PRODUCTION;
 
 const client = StandardCheckoutClient.getInstance(
   clientId,
   clientSecret,
   clientVersion,
-  Env.PRODUCTION
-  //Env.SANDBOX
+  enviroment,
 );
 
 // const clientId = "TEST-M222NJL8ZHVEM_25041";
@@ -1309,7 +1314,7 @@ app.post("/api/payment/create-order", async (req, res) => {
       ? busBookingSeatIds.join(",")
       : busBookingSeatIds ?? "";
 
-    const redirectUrl = `https://api.tirupatipackagetours.com/payment/redirect?orderId=${merchantOrderId}&seatIds=${seatIdsParam}`;
+    const redirectUrl = `${process.env.BACKEND_URL}/payment/redirect?orderId=${merchantOrderId}&seatIds=${seatIdsParam}`;
 
 
     const metaInfo = MetaInfo.builder()
@@ -1386,7 +1391,7 @@ app.get("/payment/redirect", async (req, res) => {
     : [];
 
 
-  if (!orderId || !busBookingSeatIds) return res.redirect("https://www.tirupatipackagetours.com/payment-result?status=failed");
+  if (!orderId || !busBookingSeatIds) return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=failed`);
 
   const pool = await sql.connect(dbConfig);
   // Polling function
@@ -1415,14 +1420,14 @@ app.get("/payment/redirect", async (req, res) => {
         WHERE BusBookingSeatID IN (${seatIdsStr})
       `);
 
-      return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=success&orderId=${orderId}`);
+      return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=success&orderId=${orderId}`);
     } else if (state === "FAILED") {
       await pool.request().query(`
         UPDATE BusBookingSeat
         SET PaymentStatus = 'Failed', Status = 'Cancelled'
         WHERE BusBookingSeatID IN (${seatIdsStr})
       `);
-      return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=failed&orderId=${orderId}`);
+      return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=failed&orderId=${orderId}`);
     }
 
     // still pending
@@ -1436,7 +1441,7 @@ app.get("/payment/redirect", async (req, res) => {
     WHERE BusBookingSeatID IN (${seatIdsStr})
   `);
   // If still pending after max attempts, consider it failed or show pending page
-  return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=loading&orderId=${orderId}`);
+  return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=loading&orderId=${orderId}`);
 });
 
 app.post("/api/payment/finalize", async (req, res) => {
@@ -1452,7 +1457,7 @@ app.post("/api/payment/finalize", async (req, res) => {
 
     // Now save booking in your DB
     // await axios.post(`${process.env.BACKEND_URL}/api/success`, {
-    await axios.post("https://api.tirupatipackagetours.com/api/success", {
+    await axios.post(`${process.env.BACKEND_URL}/api/success`, {
       UserID: bookingData.contactData?.UserID || 1,
       BookingdtlsID: bookingData.bookingdtlsId,
       BusBookingSeatIDs: bookingData.seatIds,
@@ -1499,17 +1504,17 @@ app.post("/api/payment/callback", async (req, res) => {
 
     if (status.data?.data?.state !== "SUCCESS") {
       // return res.redirect(`${process.env.FRONT_END_URL}/payment-failed`);
-      return res.redirect("https://www.tirupatipackagetours.com/payment-failed");
+      return res.redirect(`${process.env.FRONT_END_URL}/payment-failed`);
     }
 
     //return res.redirect(`${process.env.FRONT_END_URL}/payment-success`);
-    return res.redirect("https://www.tirupatipackagetours.com/payment-success");
+    return res.redirect(`${process.env.FRONT_END_URL}/payment-success`);
 
 
   } catch (err) {
     console.error("Callback Error:", err.response?.data || err);
     //  return res.redirect(`${process.env.FRONT_END_URL}/payment-failed`);
-    return res.redirect("https://www.tirupatipackagetours.com/payment-failed");
+    return res.redirect(`${process.env.FRONT_END_URL}/payment-failed`);
   }
 });
 
