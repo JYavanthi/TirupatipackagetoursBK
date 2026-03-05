@@ -1204,7 +1204,7 @@ app.post("/api/success", async (req, res) => {
 const clientId = process.env.PHONEPE_CLIENT_ID;
 const clientSecret = process.env.PHONEPE_CLIENT_SECRET;
 const clientVersion = 1;
-const enviroment = process.env.ENVIRONMENT == dev ? Env.SANDBOX : Env.PRODUCTION;
+const enviroment = process.env.ENVIRONMENT == "dev" ? Env.SANDBOX : Env.PRODUCTION;
 
 const client = StandardCheckoutClient.getInstance(
   clientId,
