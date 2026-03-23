@@ -28,7 +28,8 @@ app.use(
       "https://www.tirupatipackagetours.com",
       "https://tirupatipackagetours.com",
       "https://dev.tirupatipackagetours.com",
-      "http://localhost:8080"
+      "http://localhost:8080",
+      "http://localhost:8081"
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -50,7 +51,7 @@ const dbConfig = {
   port: Number(process.env.DB_PORT),
   database: process.env.DB_NAME,
   options: {
-    encrypt: true,
+    encrypt: false,
     trustServerCertificate: true,
   },
   pool: {
@@ -1320,8 +1321,8 @@ async function finalizeBooking(orderId, amount, seatIds, statusResponse) {
       statusResponse = await client.getOrderStatus(orderId);
     }
 
-    if (statusResponse.state !== "COMPLETED" || statusResponse.code !== "PAYMENT_SUCCESS") {
-      console.log(`⚠️ Payment not successful for OrderId: ${orderId}. Status: ${statusResponse.code}`);
+    if (statusResponse.state !== "COMPLETED") {
+      console.log(`⚠️ Payment not successful for OrderId: ${orderId}. Status: ${statusResponse.state} (Code: ${statusResponse.code})`);
       return { success: false, message: "Payment failed" };
     }
 
@@ -1330,7 +1331,7 @@ async function finalizeBooking(orderId, amount, seatIds, statusResponse) {
     const seatInfo = await pool.request()
       .input("SeatID", sql.Int, firstSeatId)
       .query(`
-        SELECT UserID, BusBookingDetailsID, JourneyDate, Email, ContactNo, FirstName, LastName
+        SELECT UserID, BusBookingDetailsID, BusOperatorID, JourneyDate, Email, ContactNo, FirstName, LastName
         FROM BusBookingSeat 
         WHERE BusBookingSeatID = @SeatID
       `);
@@ -1339,7 +1340,7 @@ async function finalizeBooking(orderId, amount, seatIds, statusResponse) {
       throw new Error(`Seat information not found for SeatID: ${firstSeatId}`);
     }
 
-    const { UserID, BusBookingDetailsID, JourneyDate, Email, ContactNo, FirstName, LastName } = seatInfo.recordset[0];
+    const { UserID, BusBookingDetailsID, BusOperatorID, JourneyDate, Email, ContactNo, FirstName, LastName } = seatInfo.recordset[0];
 
     // 3️⃣ Record Payment
     const payReq = pool.request();
@@ -1358,6 +1359,22 @@ async function finalizeBooking(orderId, amount, seatIds, statusResponse) {
 
     await payReq.execute("dbo.sp_Payment");
     console.log("💾 Payment recorded for:", orderId);
+
+    // 🆕 3.5️⃣ Reduce Seat Count in BusOperator
+    try {
+      console.log(`📉 Reducing ${seatIds.length} seat(s) for BusOperatorID: ${BusOperatorID}`);
+      await pool.request()
+        .input("BusOperatorID", sql.Int, BusOperatorID)
+        .input("SeatCount", sql.Int, seatIds.length)
+        .query(`
+          UPDATE BusOperator 
+          SET BusSeats = CASE WHEN (BusSeats - @SeatCount) < 0 THEN 0 ELSE (BusSeats - @SeatCount) END
+          WHERE BusOperatorID = @BusOperatorID
+        `);
+      console.log("✅ Seat reduction successful");
+    } catch (reduceErr) {
+      console.error("⚠️ Seat reduction failed (non-critical):", reduceErr.message);
+    }
 
     // 4️⃣ Generate Tickets
     const ticketReq = pool.request();
@@ -1583,6 +1600,123 @@ function generateStatusXVerify(apiPath) {
 
 
 
+// Get enriched booking/ticket details by orderId (for frontend display)
+app.get("/api/booking/details/:orderId", async (req, res) => {
+  const { orderId } = req.params;
+  try {
+    const pool = await sql.connect(dbConfig);
+
+    // 1. Fetch Basic Booking and Passenger info
+    const result = await pool.request()
+      .input("OrderId", sql.VarChar, orderId)
+      .query(`
+        SELECT 
+            bbs.BusBookingSeatID, bbs.FirstName, bbs.LastName, bbs.SeatNo, bbs.TicketNo, 
+            bbs.JourneyDate, bbs.Email, bbs.ContactNo, bbs.Gender,
+            spd.Age as Age,
+            bbd.DepartureTime, bbd.Arrivaltime, bbd.BusBooKingDetailID as busId,
+            bo.BusNo, bo.BusType, bo.BusOperatorID,
+            p.PackageName, p.PackageID as packageId,
+            pay.Amount, pay.TransactionID, pay.PaymentStatus, pay.CreatedDt as BookedOn
+        FROM Payment pay
+        JOIN BusBookingSeat bbs ON pay.BusBookingSeatID = bbs.BusBookingSeatID OR pay.TransactionID = bbs.TicketNo
+        LEFT JOIN BusBookingDetails bbd ON bbs.BusBookingDetailsID = bbd.BusBooKingDetailID
+        LEFT JOIN BusOperator bo ON bbd.OperatorID = bo.BusOperatorID
+        LEFT JOIN Package p ON bbd.PackageID = p.PackageID
+        LEFT JOIN SavedPassengerDtls spd ON bbs.UserID = spd.UserID AND bbs.FirstName = spd.FirstName
+        WHERE pay.TransactionID = @OrderId
+      `);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    const first = result.recordset[0];
+    const busBookingDetailId = first.busId;
+
+    // 2. Fetch Boarding/Dropping points
+    const pointsResult = await pool.request()
+      .input("DetailID", sql.Int, busBookingDetailId)
+      .query(`
+        SELECT PointName, AreaName as Landmark, AreaName as Address, '' as ContactNo, [Time] as ReportingTime, PointType as Type
+        FROM vw_BusBoardingAndDroppingPoints
+        WHERE BusBookingDetailID = @DetailID
+      `);
+
+    const points = pointsResult.recordset;
+    const boardingPoint = points.find(p => p.Type && p.Type.trim() === 'B') || {};
+    const droppingPoint = points.find(p => p.Type && p.Type.trim() === 'D') || {};
+
+    // 3. Construct frontend-friendly structure
+    const travellerData = result.recordset.map(r => ({
+      FirstName: r.FirstName,
+      LastName: r.LastName,
+      Age: r.Age || 0,
+      Gender: r.Gender,
+      SeatNo: r.SeatNo,
+      TicketNo: r.TicketNo
+    }));
+
+    const ticketData = {
+      travellerData,
+      contactData: {
+        ContactNo: first.ContactNo,
+        Email: first.Email
+      },
+      gstData: {},
+      totalPrice: first.Amount,
+      packageId: first.packageId,
+      TicketNo: first.TicketNo,
+      BookedOn: first.BookedOn ? moment(first.BookedOn).format("DD MMM YYYY") : "N/A",
+      tripData: {
+        boardingPoint: {
+          PointName: boardingPoint.PointName || "N/A",
+          Landmark: boardingPoint.Landmark || "N/A",
+          Address: boardingPoint.Address || "N/A",
+          ContactNo: boardingPoint.ContactNo || "N/A",
+          Time: boardingPoint.ReportingTime || "N/A",
+          City: "Bengaluru"
+        },
+        droppingPoint: {
+          PointName: droppingPoint.PointName || "N/A",
+          Landmark: droppingPoint.Landmark || "N/A",
+          Address: droppingPoint.Address || "N/A",
+          ContactNo: droppingPoint.ContactNo || "N/A",
+          Time: droppingPoint.ReportingTime || "N/A"
+        },
+        travelDate: first.JourneyDate ? moment(first.JourneyDate).format("DD MMM YYYY") : "N/A",
+        departureTime: first.DepartureTime ? moment(first.DepartureTime).format("hh:mm A") : "N/A",
+        arrivalTime: first.Arrivaltime ? moment(first.Arrivaltime).format("hh:mm A") : "N/A",
+        busType: first.BusType,
+        selectedSeats: travellerData.map(p => p.SeatNo),
+        operator: first.OperatorName || "SANCHAR6T",
+        busNumber: first.BusNo,
+        coachNumber: first.BusNo,
+        numPassengers: result.recordset.length,
+        reportingTime: boardingPoint.ReportingTime || "N/A"
+      }
+    };
+
+    res.json({ success: true, tickets: result.recordset, ticketData });
+  } catch (err) {
+    console.error("❌ Error fetching booking details:", err);
+    res.status(500).json({ success: false, message: "Error fetching booking details" });
+  }
+});
+
+// 🧪 TEMPORARY TEST ENDPOINT (Delete after verification)
+app.get("/api/test/force-success", async (req, res) => {
+  const { orderId, seatIds } = req.query;
+  const busBookingSeatIds = seatIds.split(",").map(Number);
+  try {
+    await finalizeBooking(orderId, busBookingSeatIds);
+    return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=success&orderId=${orderId}`);
+  } catch (err) {
+    console.error("Test Error:", err);
+    return res.redirect(`${process.env.FRONT_END_URL}/payment-failed`);
+  }
+});
+
 app.post("/api/payment/callback", async (req, res) => {
   try {
     const { merchantTransactionId } = req.body.data;
@@ -1610,9 +1744,6 @@ app.post("/api/payment/callback", async (req, res) => {
     return res.redirect(`${process.env.FRONT_END_URL}/payment-failed`);
   }
 });
-
-
-
 
 app.get("/api/bus/boardingPoints/:busId", async (req, res) => {
   const { busId } = req.params;
