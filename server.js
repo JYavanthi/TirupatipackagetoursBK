@@ -60,6 +60,18 @@ const dbConfig = {
   },
 };
 
+const clientId = process.env.PHONEPE_CLIENT_ID;
+const clientSecret = process.env.PHONEPE_CLIENT_SECRET;
+const clientVersion = 1;
+const enviroment = process.env.ENVIRONMENT == "dev" ? Env.SANDBOX : Env.PRODUCTION;
+
+const client = StandardCheckoutClient.getInstance(
+  clientId,
+  clientSecret,
+  clientVersion,
+  enviroment,
+);
+
 
 
 
@@ -1189,136 +1201,21 @@ app.post("/api/success", async (req, res) => {
 });
 
 
-// ---------------------------------------------
-// ✅ PHONEPE PAYMENT CREATION
-// ---------------------------------------------
-// const MERCHANT_ID = "TEST-M222NJL8ZHVEM_25041";
-// const CLIENT_SECRET = "NjIxZTdiZGYtMzlkOS00ZTkyLWFhNjItZTZhNTBjNTgyM2I0";
-// const CLIENT_VERSION = "1";
-// const SANDBOX_BASE_URL = "https://api-preprod.phonepe.com/apis/pg-sandbox";
-
-// const clientId = "SU2512041519267109485044";
-// const clientSecret = "e1babbea-ec50-4ac6-9b46-9a2ce64a5e04";
-// const clientVersion = 1;
-//
-const clientId = process.env.PHONEPE_CLIENT_ID;
-const clientSecret = process.env.PHONEPE_CLIENT_SECRET;
-const clientVersion = 1;
-const enviroment = process.env.ENVIRONMENT == "dev" ? Env.SANDBOX : Env.PRODUCTION;
-
-const client = StandardCheckoutClient.getInstance(
-  clientId,
-  clientSecret,
-  clientVersion,
-  enviroment,
-);
-
-// const clientId = "TEST-M222NJL8ZHVEM_25041";
-// const clientSecret = "NjIxZTdiZGYtMzlkOS00ZTkyLWFhNjItZTZhNTBjNTgyM2I0";
-// const clientVersion = 1;
-
-// const client = StandardCheckoutClient.getInstance(
-//   clientId,
-//   clientSecret,
-//   clientVersion,
-//   Env.SANDBOX
-// );
-
-
-
-
-
-
-
-// ---------------------------------------------
-// ✅ CALLBACK AFTER PAYMENT SUCCESS
-// ---------------------------------------------
-
-// app.post("/api/payment/create-order", async (req, res) => {
-//   try {
-//     const {
-//       merchantOrderId,
-//       amount,
-//       userId,
-//       bookingdtlsId,
-//       busBookingSeatIds,   // ⭐ ARRAY coming from frontend
-//       selectedDate,
-//       packageId,
-//       from,
-//     } = req.body;
-
-//     if (!merchantOrderId || !amount) {
-//       return res.status(400).json({
-//         error: "merchantOrderId and amount are required",
-//       });
-//     }
-
-//     // ✔ Convert array → comma string for callback
-//     const seatIdsString = Array.isArray(busBookingSeatIds)
-//       ? busBookingSeatIds.join(",")
-//       : "";
-
-//     const token = await getOAuthToken();
-//     if (!token)
-//       return res.status(500).json({ error: "Failed to get OAuth token" });
-
-//     const requestBody = {
-//       merchantOrderId,
-//       amount: parseInt(amount),
-//       expireAfter: 1200,
-//       paymentFlow: {
-//         type: "PG_CHECKOUT",
-//         message: "Payment for Tirupati Package",
-
-//         merchantUrls: {
-//           // ⭐ Pass MULTIPLE seat IDs
-//           redirectUrl: `http://localhost:5000/api/payment/callback?orderId=${merchantOrderId}&amount=${amount}&userId=${userId}&bookingdtlsId=${bookingdtlsId}&busBookingSeatIds=${seatIdsString}&journeyDate=${selectedDate}&packageId=${packageId}&from=${from}`,
-//          //  redirectUrl: `https://api.tirupatipackagetours.com/api/payment/callback?orderId=${merchantOrderId}&amount=${amount}&userId=${userId}&bookingdtlsId=${bookingdtlsId}&busBookingSeatIds=${seatIdsString}&journeyDate=${selectedDate}&packageId=${packageId}&from=${from}`,
-//         },
-//       },
-//     };
-
-//     const response = await axios.post(
-//       `${SANDBOX_BASE_URL}/checkout/v2/pay`,
-//       requestBody,
-//       {
-//         headers: {
-//           Authorization: `O-Bearer ${token}`,
-//           "Content-Type": "application/json",
-//         },
-//       }
-//     );
-
-//     res.json({
-//       orderId: merchantOrderId,
-//       phonepeResponse: response.data,
-//     });
-//   } catch (err) {
-//     console.error(
-//       "Error creating order:",
-//       err.response?.data || err.message
-//     );
-//     res.status(500).json({
-//       error: err.response?.data || err.message,
-//     });
-//   }
-// });
-
 app.post("/api/payment/create-order", async (req, res) => {
   try {
-    const { amount, busBookingSeatIds, merchantOrderId } = req.body;
+    const { amount, busBookingSeatIds } = req.body;
 
-    console.log("Merchant Order ID:", merchantOrderId);
+    const merchantIdPrefix = `ORD_${busBookingSeatIds.join("_")}_`;
+    const merchantOrderId = (merchantIdPrefix + Date.now()).substring(0, 35);
 
     const seatIdsParam = Array.isArray(busBookingSeatIds)
       ? busBookingSeatIds.join(",")
       : busBookingSeatIds ?? "";
 
-    const redirectUrl = `${process.env.BACKEND_URL}/payment/redirect?orderId=${merchantOrderId}&seatIds=${seatIdsParam}`;
-
+    const redirectUrl = `${process.env.BACK_END_URL}/payment/redirect?orderId=${merchantOrderId}&seatIds=${seatIdsParam}`;
 
     const metaInfo = MetaInfo.builder()
-      .udf1("custom-data")
+      .udf1("TirupatiPackage")
       .build();
 
     const paymentRequest = StandardCheckoutPayRequest.builder()
@@ -1344,45 +1241,7 @@ app.post("/api/payment/create-order", async (req, res) => {
   }
 });
 
-// app.get("/payment/redirect", async (req, res) => {
-//   try {
-//     const { orderId } = req.query;
 
-//     const statusResponse = await client.getOrderStatus(orderId);
-
-//     if (statusResponse.state === "COMPLETED") {
-//       return res.redirect(`${process.env.FRONT_END_URL}/payment-success`);
-//     } else {
-//       return res.redirect(`${process.env.FRONT_END_URL}/payment-failed`);
-//     }
-
-//   } catch (err) {
-//     console.error("Status Error:", err);
-//     return res.redirect(`${process.env.FRONT_END_URL}/payment-failed`);
-//   }
-// });
-// app.get("/payment/redirect", async (req, res) => {
-//   try {
-//     const { orderId } = req.query;
-//     const statusResponse = await client.getOrderStatus(orderId);
-//
-//     if (statusResponse.state === "COMPLETED") {
-//       // return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=success&orderId=${orderId}`);
-//
-//       return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=success&orderId=${orderId}`);
-//
-//     }
-//
-//     //return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=failed&orderId=${orderId}`);
-//     return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=failed&orderId=${orderId}`);
-//
-//   } catch (err) {
-//     //  return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=failed`);
-//     return res.redirect(`https://www.tirupatipackagetours.com/payment-result?status=failed`);
-//
-//   }
-// });
-//
 app.get("/payment/redirect", async (req, res) => {
   const { orderId, seatIds } = req.query;
 
@@ -1414,11 +1273,9 @@ app.get("/payment/redirect", async (req, res) => {
     console.log("State:", state);
 
     if (state === "COMPLETED") {
-      await pool.request().query(`
-        UPDATE BusBookingSeat
-        SET PaymentStatus = 'Success', Status = 'Booked'
-        WHERE BusBookingSeatID IN (${seatIdsStr})
-      `);
+      // 🚀 NEW: Call backend-driven finalization
+      const statusResponse = await client.getOrderStatus(orderId);
+      await finalizeBooking(orderId, statusResponse.amount / 100, busBookingSeatIds, statusResponse);
 
       return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=success&orderId=${orderId}`);
     } else if (state === "FAILED") {
@@ -1444,39 +1301,275 @@ app.get("/payment/redirect", async (req, res) => {
   return res.redirect(`${process.env.FRONT_END_URL}/payment-result?status=loading&orderId=${orderId}`);
 });
 
+async function finalizeBooking(orderId, amount, seatIds, statusResponse) {
+  try {
+    const pool = await sql.connect(dbConfig);
+
+    // 1️⃣ Check if already finalized to avoid duplicates
+    const check = await pool.request()
+      .input("TransactionID", sql.VarChar, orderId)
+      .query("SELECT TOP 1 PaymentStatus FROM Payment WHERE TransactionID = @TransactionID");
+
+    if (check.recordset.length > 0 && check.recordset[0].PaymentStatus === "Success") {
+      console.log(`ℹ️ Booking already finalized for OrderId: ${orderId}`);
+      return { success: true, message: "Already finalized" };
+    }
+
+    // 2️⃣ Fetch status from PhonePe if not provided (e.g. called from a background sync or redirect without callback)
+    if (!statusResponse) {
+      statusResponse = await client.getOrderStatus(orderId);
+    }
+
+    if (statusResponse.state !== "COMPLETED" || statusResponse.code !== "PAYMENT_SUCCESS") {
+      console.log(`⚠️ Payment not successful for OrderId: ${orderId}. Status: ${statusResponse.code}`);
+      return { success: false, message: "Payment failed" };
+    }
+
+    // 3️⃣ Fetch extra data (UserID, BookingdtlsID, JourneyDate, etc.) from DB
+    const firstSeatId = seatIds[0];
+    const seatInfo = await pool.request()
+      .input("SeatID", sql.Int, firstSeatId)
+      .query(`
+        SELECT UserID, BusBookingDetailsID, JourneyDate, Email, ContactNo, FirstName, LastName
+        FROM BusBookingSeat 
+        WHERE BusBookingSeatID = @SeatID
+      `);
+
+    if (seatInfo.recordset.length === 0) {
+      throw new Error(`Seat information not found for SeatID: ${firstSeatId}`);
+    }
+
+    const { UserID, BusBookingDetailsID, JourneyDate, Email, ContactNo, FirstName, LastName } = seatInfo.recordset[0];
+
+    // 3️⃣ Record Payment
+    const payReq = pool.request();
+    payReq.input("Flag", sql.Char(1), "I");
+    payReq.input("PaymentID", sql.Int, 0);
+    payReq.input("UserID", sql.Int, UserID);
+    payReq.input("BookingdtlsID", sql.Int, BusBookingDetailsID);
+    payReq.input("BusBookingSeatID", sql.Int, firstSeatId);
+    payReq.input("Amount", sql.Int, amount);
+    payReq.input("PaymentMode", sql.VarChar(50), "PhonePe");
+    payReq.input("TransactionID", sql.VarChar(sql.MAX), orderId);
+    payReq.input("TransactionResponse", sql.VarChar(sql.MAX), JSON.stringify(statusResponse));
+    payReq.input("TransactionCode", sql.VarChar(50), statusResponse.code || "00");
+    payReq.input("PaymentStatus", sql.VarChar(50), "Success");
+    payReq.input("CreatedBy", sql.Int, UserID || 1);
+
+    await payReq.execute("dbo.sp_Payment");
+    console.log("💾 Payment recorded for:", orderId);
+
+    // 4️⃣ Generate Tickets
+    const ticketReq = pool.request();
+    ticketReq.input("UserID", sql.Int, UserID);
+    ticketReq.input("BookingdtlsID", sql.Int, BusBookingDetailsID);
+    // Use ISO string date part only to avoid time mismatch in sp_GenerateTicketsAndUpdateBooking
+    const journeyDateStr = new Date(JourneyDate).toISOString().split('T')[0];
+    console.log(`Using JourneyDate for ticket generation: ${journeyDateStr}`);
+    ticketReq.input("JourneyDate", sql.Date, journeyDateStr);
+
+    const seatTable = new sql.Table("dbo.IntList");
+    seatTable.columns.add("SeatID", sql.Int);
+    seatIds.forEach(id => seatTable.rows.add(Number(id)));
+    ticketReq.input("SeatIDs", sql.TVP, seatTable);
+    console.log(`Attempting to generate tickets for SeatIDs: ${seatIds.join(",")} with UserID: ${UserID}, BookingdtlsID: ${BusBookingDetailsID}, JourneyDate: ${journeyDateStr}`);
+
+    const ticketRes = await ticketReq.execute("sp_GenerateTicketsAndUpdateBooking");
+    console.log("🎫 Tickets generated. Result count:", ticketRes.recordset?.length);
+
+    // 3️⃣ Fetch full details for the ticket
+    const detailedInfo = await pool.request()
+      .query(`
+        SELECT 
+            bbs.BusBookingSeatID, bbs.FirstName, bbs.LastName, bbs.SeatNo, bbs.TicketNo, 
+            bbs.JourneyDate, bbs.Email, bbs.ContactNo,
+            bbd.DepartureTime, bbd.Arrivaltime,
+            bo.BusNo, bo.BusType,
+            p.PackageName
+        FROM BusBookingSeat bbs
+        JOIN BusBookingDetails bbd ON bbs.BusBookingDetailsID = bbd.BusBooKingDetailID
+        JOIN BusOperator bo ON bbd.OperatorID = bo.BusOperatorID
+        JOIN Package p ON bbd.PackageID = p.PackageID
+        WHERE bbs.BusBookingSeatID IN (${seatIds.join(",")})
+      `);
+
+    console.log(`📊 Detailed Info Result (${detailedInfo.recordset.length} rows):`, JSON.stringify(detailedInfo.recordset, null, 2));
+
+    if (detailedInfo.recordset.length === 0) {
+      throw new Error(`Failed to fetch detailed ticket info for seats: ${seatIds}`);
+    }
+
+    const firstRow = detailedInfo.recordset[0];
+    const seatsList = detailedInfo.recordset.map(r => r.SeatNo || "N/A").join(", ");
+    const passengersList = detailedInfo.recordset.map(r => `${r.FirstName} ${r.LastName || ""}`).join(", ");
+    const ticketNo = firstRow.TicketNo || "PENDING";
+
+    // 5️⃣ Send Confirmation Email
+    try {
+      const mailOptions = {
+        from: `"Tirupati Package Tours" <enquiry@tirupatipackagetours.com>`,
+        to: Email || firstRow.Email,
+        subject: `E-Ticket Confirmed! - ${firstRow.PackageName}`,
+        html: `
+          <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #dcdcdc; border-radius: 8px; overflow: hidden; background-color: #ffffff;">
+            <!-- Header -->
+            <div style="background-color: #f8f8f8; padding: 20px; text-align: center; border-bottom: 2px solid #f4c542;">
+              <img src="https://tirupatipackagetours.com/tirupati-package-tours-logo.jpeg" alt="Logo" style="height: 80px; margin-bottom: 10px;">
+              <h1 style="margin: 0; color: #333; font-size: 24px; text-transform: uppercase; letter-spacing: 2px;">E-Ticket Confirmation</h1>
+              <p style="margin: 5px 0 0 0; color: #d60000; font-weight: bold;">Ticket No: ${ticketNo}</p>
+            </div>
+
+            <!-- Content -->
+            <div style="padding: 25px;">
+              <p style="font-size: 16px; line-height: 1.5; color: #333;">Hello <b>${firstRow.FirstName}</b>,</p>
+              <p style="font-size: 16px; line-height: 1.5; color: #333;">Your spiritual journey is confirmed! Here are your booking details:</p>
+
+              <!-- Trip Card -->
+              <div style="background-color: #fff9e6; border: 1px solid #f4c542; border-radius: 6px; padding: 15px; margin: 20px 0;">
+                <h3 style="margin-top: 0; color: #8a6d3b; border-bottom: 1px solid #f4c542; padding-bottom: 8px;">Trip Details</h3>
+                <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 5px 0; color: #666;">Package:</td>
+                    <td style="padding: 5px 0; font-weight: bold; color: #333;">${firstRow.PackageName}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 5px 0; color: #666;">Date:</td>
+                    <td style="padding: 5px 0; font-weight: bold; color: #333;">${new Date(firstRow.JourneyDate).toDateString()}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 5px 0; color: #666;">Bus:</td>
+                    <td style="padding: 5px 0; font-weight: bold; color: #333;">${firstRow.BusNo} (${firstRow.BusType})</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 5px 0; color: #666;">Timings:</td>
+                    <td style="padding: 5px 0; font-weight: bold; color: #333;">${firstRow.DepartureTime || "—"} to ${firstRow.Arrivaltime || "—"}</td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- Passenger Card -->
+              <div style="background-color: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 6px; padding: 15px; margin: 20px 0;">
+                <h3 style="margin-top: 0; color: #333; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px;">Passenger & Seats</h3>
+                <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 5px 0; color: #666;">Passengers:</td>
+                    <td style="padding: 5px 0; font-weight: bold; color: #333;">${passengersList}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 5px 0; color: #666;">Seat(s):</td>
+                    <td style="padding: 5px 0; font-weight: bold; color: #333;">${seatsList}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 5px 0; color: #666;">Total Paid:</td>
+                    <td style="padding: 5px 0; font-weight: bold; color: #22c55e; font-size: 18px;">₹${amount}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 5px 0; color: #666;">Transaction ID:</td>
+                    <td style="padding: 5px 0; font-size: 12px; color: #999;">${orderId}</td>
+                  </tr>
+                </table>
+              </div>
+
+              <div style="text-align: center; margin-top: 30px;">
+                <p style="color: #666; font-size: 14px;">Please carry a valid ID proof during travel. Reach the boarding point 15 mins early.</p>
+                <p style="margin-top: 20px; font-weight: bold; color: #333;">Thank you for choosing Tirupati Package Tours!</p>
+              </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background-color: #333; color: #ffffff; padding: 15px; text-align: center; font-size: 12px;">
+              <p style="margin: 0;">&copy; 2025 Tirupati Package Tours. All rights reserved.</p>
+              <p style="margin: 5px 0 0 0;">Contact us: enquiry@tirupatipackagetours.com | +91 9876543210</p>
+            </div>
+          </div>
+        `
+      };
+      await transporter.sendMail(mailOptions);
+      console.log("📧 Rich confirmation email sent to:", Email || firstRow.Email);
+    } catch (mailErr) {
+      console.error("⚠️ Email sending failed:", mailErr.message);
+    }
+
+    return { success: true };
+
+  } catch (err) {
+    console.error("❌ finalizeBooking Error:", err.message);
+    throw err;
+  }
+}
+
 app.post("/api/payment/finalize", async (req, res) => {
   try {
     const { orderId, bookingData } = req.body;
-
-    // Re-check final status (safety)
     const statusResponse = await client.getOrderStatus(orderId);
 
     if (statusResponse.state !== "COMPLETED") {
       return res.json({ success: false, message: "Payment is not completed" });
     }
 
-    // Now save booking in your DB
-    // await axios.post(`${process.env.BACKEND_URL}/api/success`, {
-    await axios.post(`${process.env.BACKEND_URL}/api/success`, {
-      UserID: bookingData.contactData?.UserID || 1,
-      BookingdtlsID: bookingData.bookingdtlsId,
-      BusBookingSeatIDs: bookingData.seatIds,
-      Amount: bookingData.totalPrice,
-      PaymentMode: "PhonePe",
-      TransactionID: orderId,
-      PaymentStatus: "Success",
-      CreatedBy: bookingData.contactData?.UserID || 1,
-      JourneyDate: bookingData.travelDate,
-
-      TransactionResponse: JSON.stringify(statusResponse),
-      TransactionCode: statusResponse.code,
-      errorCode: statusResponse.errorCode,
-    });
+    const seatIds = bookingData?.seatIds || bookingData?.BusBookingSeatIDs || [];
+    await finalizeBooking(orderId, bookingData?.totalPrice || (statusResponse.amount / 100), seatIds, statusResponse);
 
     return res.json({ success: true });
   } catch (err) {
     console.error("Payment finalize error:", err);
     return res.json({ success: false });
+  }
+});
+
+// PhonePe POST Callback (Webhook)
+// User must configure this URL in the PhonePe Dashboard: 
+// https://api.tirupatipackagetours.com/api/payment/callback-phonepe
+app.post("/api/payment/callback-phonepe", async (req, res) => {
+  try {
+    const authorization = req.headers['authorization'];
+    const responseBody = JSON.stringify(req.body);
+
+    // Credentials should be in .env
+    const username = process.env.PHONEPE_CALLBACK_USERNAME;
+    const password = process.env.PHONEPE_CALLBACK_PASSWORD;
+
+    let orderId;
+    let state;
+
+    if (username && password && authorization) {
+      try {
+        const callbackResponse = client.validateCallback(username, password, authorization, responseBody);
+        orderId = callbackResponse.payload.orderId;
+        state = callbackResponse.payload.state;
+      } catch (valErr) {
+        console.error("❌ Callback Validation Failed:", valErr.message);
+        return res.status(401).send("Invalid Callback");
+      }
+    } else {
+      // Fallback if credentials not set (less secure but useful for testing)
+      console.log("⚠️ No PhonePe callback credentials found, processing without validation.");
+      // The body might be base64 encoded or plain depending on version
+      const payload = req.body.response ? JSON.parse(Buffer.from(req.body.response, 'base64').toString()) : req.body;
+      orderId = payload.data?.merchantOrderId || payload.merchantOrderId;
+      state = payload.data?.state || payload.state;
+    }
+
+    if (orderId && (state === "COMPLETED" || state === "SUCCESS")) {
+      // 🚀 Recover seatIds from the encoded merchantOrderId
+      const parts = orderId.split("_");
+      let seatIds = [];
+      if (parts.length >= 3) {
+        seatIds = parts.slice(1, -1).map(id => parseInt(id));
+      }
+
+      if (seatIds.length > 0) {
+        const statusResponse = await client.getOrderStatus(orderId);
+        if (statusResponse.state === "COMPLETED") {
+          await finalizeBooking(orderId, statusResponse.amount / 100, seatIds, statusResponse);
+        }
+      }
+    }
+
+    return res.status(200).send("OK");
+  } catch (err) {
+    console.error("❌ Callback Handler Error:", err.message);
+    return res.status(500).send("Error");
   }
 });
 
@@ -1761,6 +1854,8 @@ setInterval(async () => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
+
+/////////////////////////////////////////////////////////////////////
 
 /////////////////////////////////////////////////////////////////////
 
