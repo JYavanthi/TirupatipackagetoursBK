@@ -19,6 +19,10 @@ const nodemailer = require("nodemailer");
 const bcrypt = require("bcryptjs");
 require("dotenv").config();
 
+// meera
+const chatRoute = require("./chat/chatRoute");
+const { init: initSearchEngine } = require("./chat/searchEngine");
+
 
 const app = express();
 //app.use(cors());
@@ -41,6 +45,9 @@ app.options("*", cors());
 app.use(express.json());
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ limit: "20mb", extended: true }));
+
+// ── MEERA CHAT ROUTE ──
+app.use("/api", chatRoute);
 
 const PORT = Number(process.env.PORT) || 5000;
 
@@ -952,6 +959,175 @@ app.post("/api/send-ticket", async (req, res) => {
     });
   }
 });
+
+app.get("/api/get-booking-by-phone", async (req, res) => {
+  const { phone, date } = req.query;
+
+  if (!phone) {
+    return res.status(400).json({ success: false, error: "phone is required" });
+  }
+
+  try {
+    const pool = await sql.connect(dbConfig);
+
+    // ── Step 1: Get the booking ──
+    const bookingResult = await pool.request()
+      .input("ContactNo", sql.VarChar(50), phone)
+      .input("JourneyDate", sql.Date, date || null)
+      .query(`
+        SELECT TOP 1
+          bbs.BusBookingSeatID,
+          bbs.BusBookingDetailsID,
+          bbs.FirstName,
+          bbs.LastName,
+          bbs.SeatNo,
+          bbs.TicketNo,
+          bbs.JourneyDate,
+          bbs.Email,
+          bbs.ContactNo,
+          bbs.Gender,
+          bbd.DepartureTime,
+          bbd.Arrivaltime,
+          bbd.BusBooKingDetailID AS busId,
+          bo.BusNo,
+          bo.BusType,
+          p.PackageName,
+          p.PackageID,
+          spd.Age
+        FROM BusBookingSeat bbs
+        LEFT JOIN BusBookingDetails bbd ON bbs.BusBookingDetailsID = bbd.BusBooKingDetailID
+        LEFT JOIN BusOperator bo ON bbd.OperatorID = bo.BusOperatorID
+        LEFT JOIN Package p ON bbd.PackageID = p.PackageID
+        LEFT JOIN SavedPassengerDtls spd 
+          ON bbs.UserID = spd.UserID AND bbs.FirstName = spd.FirstName
+        WHERE bbs.ContactNo = @ContactNo
+          AND bbs.Status = 'Booked'
+          AND (
+            (@JourneyDate IS NULL AND CAST(bbs.JourneyDate AS DATE) >= CAST(GETDATE() AS DATE))
+            OR
+            (@JourneyDate IS NOT NULL AND CAST(bbs.JourneyDate AS DATE) = @JourneyDate)
+          )
+        ORDER BY bbs.JourneyDate ASC
+      `);
+
+    if (!bookingResult.recordset.length) {
+      return res.json({ booking: null });
+    }
+
+    const first = bookingResult.recordset[0];
+
+    // ── Step 2: Get all seats for this booking ──
+    const allSeatsResult = await pool.request()
+      .input("BusBookingDetailsID", sql.Int, first.BusBookingDetailsID)
+      .input("ContactNo", sql.VarChar(50), phone)
+      .input("JourneyDate", sql.Date, first.JourneyDate)
+      .query(`
+        SELECT 
+          bbs.FirstName,
+          bbs.LastName,
+          bbs.SeatNo,
+          bbs.TicketNo,
+          bbs.Gender,
+          spd.Age
+        FROM BusBookingSeat bbs
+        LEFT JOIN SavedPassengerDtls spd 
+          ON bbs.UserID = spd.UserID AND bbs.FirstName = spd.FirstName
+        WHERE bbs.BusBookingDetailsID = @BusBookingDetailsID
+          AND bbs.ContactNo = @ContactNo
+          AND CAST(bbs.JourneyDate AS DATE) = CAST(@JourneyDate AS DATE)
+          AND bbs.Status = 'Booked'
+      `);
+
+    // ── Step 3: Get boarding and dropping points ──
+    const pointsResult = await pool.request()
+      .input("DetailID", sql.Int, first.busId)
+      .query(`
+        SELECT 
+          LTRIM(RTRIM(PointType)) AS PointType,
+          PointName,
+          AreaName AS Landmark,
+          AreaName AS Address,
+          '' AS ContactNo,
+          CONVERT(varchar, [Time], 108) AS ReportingTime
+        FROM vw_BusBoardingAndDroppingPoints
+        WHERE BusBooKingDetailID = @DetailID
+      `);
+
+    const points = pointsResult.recordset;
+    const boardingPoint = points.find(p => p.PointType === 'B') || {};
+    const droppingPoint = points.find(p => p.PointType === 'D') || {};
+
+    // ── Step 4: Get total price from Payment table ──
+    const paymentResult = await pool.request()
+      .input("BookingdtlsID", sql.Int, first.BusBookingDetailsID)
+      .query(`
+        SELECT TOP 1 Amount 
+        FROM Payment 
+        WHERE BookingdtlsID = @BookingdtlsID
+          AND PaymentStatus = 'Success'
+        ORDER BY CreatedDt DESC
+      `);
+
+    const totalPrice = paymentResult.recordset[0]?.Amount || 0;
+
+    // ── Step 5: Shape response to match MeeraChat BookingData type ──
+    res.json({
+      booking: {
+        travellerData: allSeatsResult.recordset.map(r => ({
+          FirstName: r.FirstName || "",
+          LastName: r.LastName || "",
+          Age: String(r.Age || ""),
+          Gender: r.Gender || "",
+          SeatNo: r.SeatNo || "",
+        })),
+        contactData: {
+          ContactNo: first.ContactNo || "",
+          Email: first.Email || "",
+        },
+        gstData: {},
+        totalPrice: totalPrice,
+        packageId: String(first.PackageID || ""),
+        from: boardingPoint.PointName || "Bengaluru",
+        tickets: [{ TicketNo: first.TicketNo || "N/A" }],
+        tripData: {
+          boardingPoint: {
+            City: "Bengaluru",
+            PointName: boardingPoint.PointName || "",
+            Landmark: boardingPoint.Landmark || "",
+            Address: boardingPoint.Address || "",
+            ContactNo: boardingPoint.ContactNo || "",
+          },
+          droppingPoint: {
+            City: "Tirupati",
+            PointName: droppingPoint.PointName || "",
+            Landmark: droppingPoint.Landmark || "",
+            Address: droppingPoint.Address || "",
+            ContactNo: droppingPoint.ContactNo || "",
+          },
+          travelDate: first.JourneyDate
+            ? new Date(first.JourneyDate).toISOString().split("T")[0]
+            : "",
+          departureTime: first.DepartureTime
+            ? moment(first.DepartureTime).format("hh:mm A")
+            : "",
+          arrivalTime: first.Arrivaltime
+            ? moment(first.Arrivaltime).format("hh:mm A")
+            : "",
+          busType: first.BusType || "",
+          coachType: first.BusType || "",
+          busNumber: first.BusNo || "",
+          operator: "SANCHAR6T",
+          selectedSeats: allSeatsResult.recordset.map(r => r.SeatNo),
+        },
+      },
+    });
+
+  } catch (err) {
+    console.error("❌ get-booking-by-phone error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get("/api/busBoardingCounts", async (req, res) => {
   try {
     const pool = await sql.connect(dbConfig);
@@ -1134,6 +1310,8 @@ app.post("/api/success", async (req, res) => {
     }
 
     const pool = await sql.connect(dbConfig);
+
+    
 
     // ------------------------------------------------------------------
     // 1️⃣ SAVE PAYMENT
@@ -1606,7 +1784,6 @@ app.get("/api/booking/details/:orderId", async (req, res) => {
   try {
     const pool = await sql.connect(dbConfig);
 
-    // 1. Fetch Basic Booking and Passenger info
     const result = await pool.request()
       .input("OrderId", sql.VarChar, orderId)
       .query(`
@@ -1634,20 +1811,20 @@ app.get("/api/booking/details/:orderId", async (req, res) => {
     const first = result.recordset[0];
     const busBookingDetailId = first.busId;
 
-    // 2. Fetch Boarding/Dropping points
+    
     const pointsResult = await pool.request()
       .input("DetailID", sql.Int, busBookingDetailId)
       .query(`
-        SELECT PointName, AreaName as Landmark, AreaName as Address, '' as ContactNo, [Time] as ReportingTime, PointType as Type
+        SELECT PointName, AreaName as Landmark, AreaName as Address, '' as ContactNo, 
+               [Time] as ReportingTime, PointType as Type
         FROM vw_BusBoardingAndDroppingPoints
-        WHERE BusBookingDetailID = @DetailID
+        WHERE BusBooKingDetailID = @DetailID
       `);
 
     const points = pointsResult.recordset;
     const boardingPoint = points.find(p => p.Type && p.Type.trim() === 'B') || {};
     const droppingPoint = points.find(p => p.Type && p.Type.trim() === 'D') || {};
 
-    // 3. Construct frontend-friendly structure
     const travellerData = result.recordset.map(r => ({
       FirstName: r.FirstName,
       LastName: r.LastName,
@@ -1981,13 +2158,12 @@ setInterval(async () => {
     await sql.close();
   }
 }, ARCHIVE_INTERVAL_HOURS * 60 * 60 * 1000); // every 6 hours
+
+// ── LOAD FAISS SEARCH ENGINE AT STARTUP ──
+initSearchEngine().catch(console.error);
+
 // ✅ Start the server
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
 
-/////////////////////////////////////////////////////////////////////
-
-/////////////////////////////////////////////////////////////////////
-
-//////////////////////////////////////////////
