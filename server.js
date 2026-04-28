@@ -1311,7 +1311,7 @@ app.post("/api/success", async (req, res) => {
 
     const pool = await sql.connect(dbConfig);
 
-    
+
 
     // ------------------------------------------------------------------
     // 1️⃣ SAVE PAYMENT
@@ -1382,44 +1382,77 @@ app.post("/api/success", async (req, res) => {
 
 app.post("/api/payment/create-order", async (req, res) => {
   try {
-    const { amount, busBookingSeatIds } = req.body;
+    let { amount, busBookingSeatIds } = req.body;
 
+    // ✅ VALIDATION
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+
+    if (!Array.isArray(busBookingSeatIds) || busBookingSeatIds.length === 0) {
+      return res.status(400).json({ error: "Seat IDs are required" });
+    }
+
+    console.log("🔥 Incoming amount:", amount);
+    console.log("🔥 Seat IDs:", busBookingSeatIds);
+
+    // ✅ SAFE merchantOrderId
     const merchantIdPrefix = `ORD_${busBookingSeatIds.join("_")}_`;
     const merchantOrderId = (merchantIdPrefix + Date.now()).substring(0, 35);
 
-    const seatIdsParam = Array.isArray(busBookingSeatIds)
-      ? busBookingSeatIds.join(",")
-      : busBookingSeatIds ?? "";
+    // ✅ seatIds param for redirect
+    const seatIdsParam = busBookingSeatIds.join(",");
 
-    const redirectUrl = `${process.env.BACK_END_URL}/payment/redirect?orderId=${merchantOrderId}&seatIds=${seatIdsParam}`;
+    // ⚠️ VERY IMPORTANT: must be correct URL
+    const BACKEND_URL =
+      process.env.BACK_END_URL || "http://localhost:5000";
 
+    const redirectUrl = `${BACKEND_URL}/payment/redirect?orderId=${merchantOrderId}&seatIds=${seatIdsParam}`;
+
+    console.log("🔥 Redirect URL:", redirectUrl);
+
+    // ✅ PhonePe Meta
     const metaInfo = MetaInfo.builder()
-      .udf1("TirupatiPackage")
+      .udf1("Sanchar6T")
       .build();
 
+    // ✅ Payment request
     const paymentRequest = StandardCheckoutPayRequest.builder()
       .merchantOrderId(merchantOrderId)
-      .amount(Number(amount))     // amount in paise
+      .amount(Number(amount)) // already in paisa
       .redirectUrl(redirectUrl)
       .metaInfo(metaInfo)
       .build();
 
+    console.log("🔥 Sending request to PhonePe...");
+
+    // ✅ CALL PhonePe
     const response = await client.pay(paymentRequest);
 
+    console.log("🔥 PhonePe response:", response);
+
+    if (!response?.redirectUrl) {
+      throw new Error("No redirect URL from PhonePe");
+    }
+
+    // ✅ FINAL RESPONSE
     return res.json({
       success: true,
       phonepeResponse: {
-        redirectUrl: response.redirectUrl
+        redirectUrl: response.redirectUrl,
       },
-      merchantOrderId
+      merchantOrderId,
     });
 
   } catch (err) {
-    console.error("Payment Error:", err);
-    return res.status(500).json({ error: err.message });
+    console.error("❌ Payment Error:", err.message);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
   }
 });
-
 
 app.get("/payment/redirect", async (req, res) => {
   const { orderId, seatIds } = req.query;
@@ -1593,9 +1626,34 @@ async function finalizeBooking(orderId, amount, seatIds, statusResponse) {
     if (detailedInfo.recordset.length === 0) {
       throw new Error(`Failed to fetch detailed ticket info for seats: ${seatIds}`);
     }
-
+    const http = require("http");
+    const { WebSocketServer } = require("ws");
     const firstRow = detailedInfo.recordset[0];
-    const seatsList = detailedInfo.recordset.map(r => r.SeatNo || "N/A").join(", ");
+    const journeyDate = new Date(firstRow.JourneyDate);
+
+    const formatDateTime = (baseDate, time) => {
+      if (!time) return null;
+
+      const t = new Date(time);
+
+      return new Date(
+        baseDate.getFullYear(),
+        baseDate.getMonth(),
+        baseDate.getDate(),
+        t.getHours(),
+        t.getMinutes()
+      );
+    };
+
+    let departureDT = formatDateTime(journeyDate, firstRow.DepartureTime);
+    let arrivalDT = formatDateTime(journeyDate, firstRow.Arrivaltime);
+
+    if (arrivalDT < departureDT) {
+      arrivalDT.setDate(arrivalDT.getDate() + 1);
+    }
+
+    const departureStr = moment.utc(departureDT).local().format("DD MMM YYYY, hh:mm A");
+    const arrivalStr = moment.utc(arrivalDT).local().format("DD MMM YYYY, hh:mm A"); const seatsList = detailedInfo.recordset.map(r => r.SeatNo || "N/A").join(", ");
     const passengersList = detailedInfo.recordset.map(r => `${r.FirstName} ${r.LastName || ""}`).join(", ");
     const ticketNo = firstRow.TicketNo || "PENDING";
 
@@ -1608,7 +1666,7 @@ async function finalizeBooking(orderId, amount, seatIds, statusResponse) {
         html: `
           <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #dcdcdc; border-radius: 8px; overflow: hidden; background-color: #ffffff;">
             <!-- Header -->
-            <div style="background-color: #f8f8f8; padding: 20px; text-align: center; border-bottom: 2px solid #f4c542;">
+            <div style="background-color: ; padding: 20px; text-align: center; border-bottom: 2px solid #f4c542;">
               <img src="https://tirupatipackagetours.com/tirupati-package-tours-logo.jpeg" alt="Logo" style="height: 80px; margin-bottom: 10px;">
               <h1 style="margin: 0; color: #333; font-size: 24px; text-transform: uppercase; letter-spacing: 2px;">E-Ticket Confirmation</h1>
               <p style="margin: 5px 0 0 0; color: #d60000; font-weight: bold;">Ticket No: ${ticketNo}</p>
@@ -1635,10 +1693,12 @@ async function finalizeBooking(orderId, amount, seatIds, statusResponse) {
                     <td style="padding: 5px 0; color: #666;">Bus:</td>
                     <td style="padding: 5px 0; font-weight: bold; color: #333;">${firstRow.BusNo} (${firstRow.BusType})</td>
                   </tr>
-                  <tr>
-                    <td style="padding: 5px 0; color: #666;">Timings:</td>
-                    <td style="padding: 5px 0; font-weight: bold; color: #333;">${firstRow.DepartureTime || "—"} to ${firstRow.Arrivaltime || "—"}</td>
-                  </tr>
+                 <tr>
+  <td style="padding: 5px 0; color: #666;">Timings:</td>
+  <td style="padding: 5px 0; font-weight: bold; color: #333;">
+    ${departureStr} to ${arrivalStr}
+  </td>
+</tr>
                 </table>
               </div>
 
@@ -1692,6 +1752,19 @@ async function finalizeBooking(orderId, amount, seatIds, statusResponse) {
     throw err;
   }
 }
+
+app.all('/exotel/voice', (req, res) => {
+  const wsUrl = `wss://${req.headers.host}/media-stream`;
+
+  res.set('Content-Type', 'text/xml');
+  res.send(`
+    <Response>
+      <Connect>
+        <Stream url="${wsUrl}" />
+      </Connect>
+    </Response>
+  `);
+});
 
 app.post("/api/payment/finalize", async (req, res) => {
   try {
@@ -1811,7 +1884,7 @@ app.get("/api/booking/details/:orderId", async (req, res) => {
     const first = result.recordset[0];
     const busBookingDetailId = first.busId;
 
-    
+
     const pointsResult = await pool.request()
       .input("DetailID", sql.Int, busBookingDetailId)
       .query(`
@@ -2163,7 +2236,34 @@ setInterval(async () => {
 initSearchEngine().catch(console.error);
 
 // ✅ Start the server
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
+// app.listen(PORT, "0.0.0.0", () => {
+//   console.log(`🚀 Server running at http://localhost:${PORT}`);
+// });
+
+const http = require("http");
+const { WebSocketServer } = require("ws");
+
+// HTTP server
+const server = http.createServer(app);
+
+// WebSocket
+const wss = new WebSocketServer({ server });
+
+wss.on("connection", (ws, req) => {
+  if (!req.url.includes("/media-stream")) return;
+
+  console.log("📞 Call connected");
+
+  ws.on("message", () => {
+    console.log("🎤 Audio received");
+  });
+
+  ws.on("close", () => {
+    console.log("❌ Call ended");
+  });
 });
 
+// Start server
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
+});
